@@ -112,7 +112,8 @@ benchmarks file:
   "max_grade": null,
   "setter": null,
   "output_dir": "data",
-  "write_benchmark_files": true
+  "write_benchmark_files": true,
+  "moonlink_pwa_dir": null
 }
 ```
 
@@ -124,6 +125,7 @@ benchmarks file:
 | `setter` | Only problems whose setter name contains this string (case-insensitive), e.g. `"Ben Moon"`. |
 | `output_dir` | Where dataset files are written (relative to the repo). |
 | `write_benchmark_files` | Also write a `*_benchmarks` subset next to each full per-angle file. |
+| `moonlink_pwa_dir` | If set to a [moonlink-pwa](https://github.com/mbdalpha/moonlink-pwa) checkout, `to_moonlink.py` also merges everything it converted into one compact `problems.json` there. Serve the PWA from that directory and it auto-loads the library on startup — no drag-and-drop needed. |
 
 Note the sync API always returns a board's **complete catalog** in one go, so
 `boards` is what controls the actual download; the other keys filter what gets
@@ -248,19 +250,28 @@ config it produces:
 - `data/moonboard2024_40_moonlink.json` — all 35,773 40° problems
 - `data/moonboard2024_40_benchmarks_moonlink.json` — the 411 benchmarks
 
+If `moonlink_pwa_dir` is set, it additionally writes a combined compact
+`problems.json` (all configured boards/angles in one file, ~5 MB instead of
+~25 MB for the full 2024/40° catalog) straight into the PWA directory.
+
 ## Step E — use it in moonlink-pwa
 
-1. Open moonlink-pwa over **HTTPS or as a local file** (not inside an app
-   preview). Web Bluetooth requires **Chrome/Edge** on desktop or Android; on
-   **iPhone use the Bluefy browser** (Safari can't do Web Bluetooth).
-2. Use its **Import problems file** button and select one of the
-   `*_moonlink.json` files.
-   - Start with the **benchmarks** file (~290 KB) — it loads instantly and is
-     what you'll usually want on the board.
-   - The full file (~25 MB / 35k problems) works but is heavy on a phone (it
-     renders the first 200 matches and filters in memory).
-3. Filter by grade / benchmark / search, pick a problem, connect to your board,
-   and it lights up over Bluetooth.
+The integrated way (recommended): set `"moonlink_pwa_dir"` in `config.json` to
+your moonlink-pwa checkout, run `python3 to_moonlink.py`, then serve the PWA
+from that directory (`python3 -m http.server` works — `localhost` counts as a
+secure context for Web Bluetooth). The app finds `problems.json` next to it,
+loads the whole library automatically, and keeps a copy in IndexedDB so it's
+still there offline. Re-running Step D refreshes it on the next page load.
+
+The standalone way: open moonlink-pwa anywhere (HTTPS or local file — Web
+Bluetooth needs **Chrome/Edge** on desktop/Android; on **iPhone use the Bluefy
+browser**) and drag any of the `*_moonlink.json` files onto its drop zone. The
+PWA also understands the raw `data/*_40.json` scraper files in a pinch. A
+dropped library is persisted on the device too.
+
+Either way: filter by grade range / board / angle / benchmark / search, sort by
+repeats, grade, rating, date or name, pick a problem (or hit **Random**),
+connect to your board, and it lights up over Bluetooth.
 
 ## Running it again later
 
@@ -300,7 +311,7 @@ you stopped it (`sudo systemctl start firewall`).
 | `config.json` | which boards/angles/subsets to download — see [section 4](#4-choosing-what-to-download--configjson) |
 | `config.py` | loads + validates `config.json`; shared by the fetch and convert scripts |
 | `fetch_problems.py` | replays the app's sync API and pages the full catalog (per `config.json`) |
-| `to_moonlink.py` | converts the dataset into moonlink-pwa's import schema (per `config.json`) |
+| `to_moonlink.py` | converts the dataset into moonlink-pwa's import schema (per `config.json`); with `moonlink_pwa_dir` set, also writes the PWA's auto-loaded `problems.json` |
 | `pull_moonboard.py` | legacy `moonboard.com` website scraper (kept for reference; no longer returns 2024 data) |
 | `run.sh` | `nix-shell` wrapper for `pull_moonboard.py` |
 | `APP_API_NOTES.md` | the reverse-engineered backend, endpoints, and auth flow |

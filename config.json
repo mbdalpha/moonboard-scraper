@@ -7,5 +7,6 @@
   "max_grade": null,
   "setter": null,
   "output_dir": "data",
-  "write_benchmark_files": true
+  "write_benchmark_files": true,
+  "moonlink_pwa_dir": "/home/k/Downloads/moonlink-pwa"
 }

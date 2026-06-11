@@ -22,6 +22,10 @@ config.json keys (all optional; defaults reproduce the original behaviour):
   output_dir           where dataset files go (relative to this directory)
   write_benchmark_files  also write a *_benchmarks subset next to each full
                        per-angle file (ignored when benchmarks_only is true)
+  moonlink_pwa_dir     if set, to_moonlink.py also writes a combined compact
+                       problems.json (all configured boards/angles) into this
+                       directory — point it at a moonlink-pwa checkout and the
+                       app auto-loads the library on startup
 
 The sync API always returns a board's complete catalog, so `boards` controls
 what is actually downloaded; the other keys filter what is written to disk.
@@ -47,6 +51,7 @@ DEFAULTS = {
     "setter": None,
     "output_dir": "data",
     "write_benchmark_files": True,
+    "moonlink_pwa_dir": None,
 }
 
 

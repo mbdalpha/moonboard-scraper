@@ -7,8 +7,17 @@ like "s~D5~|l~G11~|r~I12~|e~J18~" (s=start, l/r=hand, e=end). This rewrites it.
 
 Converts whatever boards/angles config.json selected (the files written by
 fetch_problems.py) — see config.py for the schema.
+
+When config.json sets "moonlink_pwa_dir", everything converted is also merged
+into one compact problems.json in that directory ("moonlink/2" format, short
+keys, packed holds string). moonlink-pwa auto-loads that file on startup when
+served from the same directory, so the two repos plug straight into each other
+— the per-angle *_moonlink.json files keep the classic verbose schema and work
+anywhere, including drag-and-drop into the PWA.
 """
+import datetime
 import json
+import pathlib
 import re
 import sys
 
@@ -33,6 +42,15 @@ def parse_moves(moves_str):
     return out
 
 
+def compact_holds(moves):
+    """Pack parsed moves into "start|mid|end", e.g. "G5,H5|A16,C12|C18"."""
+    start = [m["Description"] for m in moves if m["IsStart"]]
+    end = [m["Description"] for m in moves if m["IsEnd"]]
+    mid = [m["Description"] for m in moves
+           if not m["IsStart"] and not m["IsEnd"]]
+    return "|".join(",".join(b) for b in (start, mid, end))
+
+
 def config_for(problem, angle):
     for c in problem.get("configurations") or []:
         if c.get("configuration") == angle:
@@ -41,7 +59,9 @@ def config_for(problem, angle):
 
 
 def convert(problems, angle, setup_label):
-    out = []
+    """Returns (verbose, compact): the classic moonlink-pwa schema and the
+    short-key "moonlink/2" records for the combined problems.json."""
+    verbose, compact = [], []
     for p in problems:
         cfg = config_for(p, angle)
         if not cfg:
@@ -49,24 +69,46 @@ def convert(problems, angle, setup_label):
         moves = parse_moves(p.get("moves"))
         if not moves:
             continue
-        out.append({
+        verbose.append({
             "Name": p.get("name") or "Untitled",
             "Grade": cfg.get("grade") or cfg.get("userGrade") or "?",
             "UserGrade": cfg.get("userGrade"),
+            "UserRating": cfg.get("userRating"),
             "IsBenchmark": bool(cfg.get("isBenchmark")),
             "Repeats": cfg.get("repeats"),
+            "DateInserted": p.get("dateInserted"),
             "Setter": {"Nickname": p.get("setter") or ""},
             "Holdsetup": {"Description": setup_label},
             "MoonBoardConfiguration": {"Description": angle + " MoonBoard"},
             "Moves": moves,
         })
-    return out
+        c = {
+            "n": p.get("name") or "Untitled",
+            "g": cfg.get("grade") or cfg.get("userGrade") or "?",
+            "s": p.get("setter") or "",
+            "bo": setup_label,
+            "a": angle,
+            "h": compact_holds(moves),
+        }
+        if cfg.get("userGrade"):
+            c["u"] = cfg["userGrade"]
+        if cfg.get("isBenchmark"):
+            c["b"] = 1
+        if cfg.get("repeats"):
+            c["r"] = cfg["repeats"]
+        if cfg.get("userRating"):
+            c["t"] = cfg["userRating"]
+        if p.get("dateInserted"):
+            c["d"] = str(p["dateInserted"])[:10]
+        compact.append(c)
+    return verbose, compact
 
 
 def main():
     cfg = load_config()
     out = output_dir(cfg)
     converted_any = False
+    combined = []
 
     for board in cfg["boards"]:
         slug = board_slug(board)
@@ -82,7 +124,9 @@ def main():
             if not src_path.exists():
                 print(f"skipping {board['name']} {angle}: {src_path} not found")
                 continue
-            full = convert(json.load(open(src_path)), angle, board["name"])
+            full, compact = convert(json.load(open(src_path)), angle,
+                                    board["name"])
+            combined.extend(compact)
             dst = out / f"{slug}_{tok}_moonlink.json"
             dst.write_text(json.dumps(full))
             print(f"converted {len(full)} {board['name']} {angle} problems -> {dst}")
@@ -95,6 +139,21 @@ def main():
 
     if not converted_any:
         sys.exit("nothing converted — no fetched dataset files matched config.json")
+
+    if cfg["moonlink_pwa_dir"]:
+        pwa = pathlib.Path(cfg["moonlink_pwa_dir"]).expanduser()
+        if not pwa.is_absolute():
+            pwa = pathlib.Path(__file__).resolve().parent / pwa
+        if not pwa.is_dir():
+            sys.exit(f"moonlink_pwa_dir {pwa} is not a directory")
+        dst = pwa / "problems.json"
+        dst.write_text(json.dumps({
+            "format": "moonlink/2",
+            "generated": datetime.datetime.now(datetime.timezone.utc)
+                         .strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "problems": combined,
+        }, separators=(",", ":")))
+        print(f"wrote {len(combined)} combined problems -> {dst}")
 
 
 if __name__ == "__main__":
