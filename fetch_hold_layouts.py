@@ -88,6 +88,7 @@ def main():
         try:
             client.login()
             index = {}
+            manifests = {}
             for board in cfg["boards"]:
                 slug = board_slug(board)
                 layout = fetch_layout(client, board["id"])
@@ -100,6 +101,7 @@ def main():
                       f"{len(layout['Data'])} holdsets")
                 (holds_dir / f"{slug}.json").write_text(json.dumps(manifest))
                 index[slug] = board["name"]
+                manifests[slug] = manifest
                 fetched = skipped = 0
                 for img, _rot in manifest["cells"].values():
                     dst = holds_dir / "img" / img
@@ -120,7 +122,48 @@ def main():
             build_zip(holds_dir, zip_path)
             mb = zip_path.stat().st_size / 1e6
             print(f"\nbundled {len(index)} board(s) -> {zip_path} ({mb:.1f} MB)")
-            print("import that zip into moonlink-pwa (drop it on the library zone)")
+
+            # Also write a JSON bundle (images base64-encoded). It's bigger than
+            # the zip, but being plain text it survives downloads/transfers to a
+            # phone intact — unlike a binary zip — so it's the reliable import
+            # for a hosted PWA. moonlink-pwa imports either.
+            seen, images_b64 = set(), {}
+            for man in manifests.values():
+                for img, _rot in man["cells"].values():
+                    if img in seen:
+                        continue
+                    seen.add(img)
+                    p = holds_dir / "img" / img
+                    if p.exists():
+                        images_b64[img] = base64.b64encode(p.read_bytes()).decode()
+            json_path = out / "moonlink_holds.json"
+            json_path.write_text(json.dumps({
+                "format": "moonlink-holds/1",
+                "index": index,
+                "layouts": manifests,
+                "images": images_b64,
+            }, separators=(",", ":")))
+            jmb = json_path.stat().st_size / 1e6
+            print(f"bundled {len(index)} board(s) -> {json_path} ({jmb:.1f} MB)")
+            print("import the .json on a phone (survives transfer); the .zip is "
+                  "smaller for desktop/served use")
+
+            # If a moonlink-pwa checkout is configured, also drop the holds in
+            # next to the app (like problems.json) so a hosted/served PWA
+            # auto-loads them same-origin — no transfer to corrupt at all.
+            if cfg["moonlink_pwa_dir"]:
+                import pathlib
+                import shutil
+                pwa = pathlib.Path(cfg["moonlink_pwa_dir"]).expanduser()
+                if pwa.is_dir():
+                    dst = pwa / "holds"
+                    if dst.exists():
+                        shutil.rmtree(dst)
+                    shutil.copytree(holds_dir, dst)
+                    print(f"copied holds -> {dst} (served auto-load; include it "
+                          "in your deploy)")
+                else:
+                    print(f"moonlink_pwa_dir {pwa} is not a directory — skipped copy")
         finally:
             client.close()
 

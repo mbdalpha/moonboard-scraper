@@ -24,6 +24,7 @@ data_test/
 # hold photos + layouts pulled from moonboard.com (Moon's imagery — pull your own)
 data/holds/
 data/moonlink_holds.zip
+data/moonlink_holds.json
 
 # python
 __pycache__/
