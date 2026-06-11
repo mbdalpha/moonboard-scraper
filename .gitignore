@@ -21,6 +21,10 @@ data/helpers.min.js
 data/*.json
 data_test/
 
+# hold photos + layouts pulled from moonboard.com (Moon's imagery — pull your own)
+data/holds/
+data/moonlink_holds.zip
+
 # python
 __pycache__/
 *.pyc

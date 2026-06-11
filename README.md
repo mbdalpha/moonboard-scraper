@@ -266,9 +266,12 @@ still there offline. Re-running Step D refreshes it on the next page load.
 Optional eye candy: `python3 fetch_hold_layouts.py` (needs the same
 headed-Chrome moonboard.com login as the legacy scraper) downloads each
 configured board's **hold photos and layout** from the website's hold-setup
-viewer into `<moonlink_pwa_dir>/holds/`. The PWA then draws the actual holds
-under the LED grid — problems light up as rings around real holds — switching
-layouts automatically per problem's board.
+viewer into `data/holds/` and bundles them into **`data/moonlink_holds.zip`**.
+Drop that zip onto moonlink-pwa's library zone (same place as a problems file)
+and the app draws the actual holds under the LED grid — problems light up as
+rings around real holds, switching layouts automatically per problem's board.
+The zip is kept in this repo, so it works regardless of any moonlink-pwa
+checkout; the PWA remembers it (IndexedDB) after one import.
 
 The standalone way: open moonlink-pwa anywhere (HTTPS or local file — Web
 Bluetooth needs **Chrome/Edge** on desktop/Android; on **iPhone use the Bluefy
@@ -319,7 +322,7 @@ you stopped it (`sudo systemctl start firewall`).
 | `config.py` | loads + validates `config.json`; shared by the fetch and convert scripts |
 | `fetch_problems.py` | replays the app's sync API and pages the full catalog (per `config.json`) |
 | `to_moonlink.py` | converts the dataset into moonlink-pwa's import schema (per `config.json`); with `moonlink_pwa_dir` set, also writes the PWA's auto-loaded `problems.json` |
-| `fetch_hold_layouts.py` | downloads per-hold photos + board layouts from moonboard.com into the PWA's `holds/` dir (hold-photo rendering) |
+| `fetch_hold_layouts.py` | downloads per-hold photos + board layouts from moonboard.com into `data/holds/` and bundles `data/moonlink_holds.zip` for import into the PWA (hold-photo rendering) |
 | `pull_moonboard.py` | legacy `moonboard.com` website scraper (kept for reference; no longer returns 2024 data) |
 | `run.sh` | `nix-shell` wrapper for `pull_moonboard.py` |
 | `APP_API_NOTES.md` | the reverse-engineered backend, endpoints, and auth flow |

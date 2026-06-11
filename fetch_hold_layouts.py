@@ -1,25 +1,30 @@
 #!/usr/bin/env python3
-"""Pull per-hold photos + board layouts from moonboard.com for moonlink-pwa.
+"""Pull per-hold photos + board layouts from moonboard.com into the dataset.
 
 The (retired) moonboard.com hold-setup viewer composes each board out of
 individual hold photos: /content/images/holds/h{number}.png, positioned and
 rotated per POST /HoldSetups/GetHoldsetupHolds (Kendo filter
 `setupid~eq~{id}`; website setup ids match the app board ids in config.json).
-This replays that for every board in config.json and writes:
+This replays that for every board in config.json and writes, under data/holds/:
 
-  data/holds_{slug}.json               raw layout response
-  {moonlink_pwa_dir}/holds/{slug}.json PWA manifest {cell: [image, rotation]}
-  {moonlink_pwa_dir}/holds/img/*.png   the hold photos (shared across boards)
-  {moonlink_pwa_dir}/holds/index.json  slug -> board label
+  index.json        slug -> board label
+  {slug}.json       manifest {label, cells:{CELL:[image, rotation]}}
+  img/*.png         the hold photos (shared across boards)
 
-moonlink-pwa then shows the actual holds under the LED circles for whatever
-board a problem belongs to. Needs the same headed-Chrome login as
-pull_moonboard.py (Cloudflare): run via
+and bundles all of that into a single importable archive:
+
+  data/moonlink_holds.zip
+
+Import that zip into moonlink-pwa (drop it on the library zone, same as a
+problems file) and it renders the real holds under the LED grid. The holds live
+in this repo, independent of any moonlink-pwa checkout. Needs the same
+headed-Chrome login as pull_moonboard.py (Cloudflare): run via
   nix-shell -p "python3.withPackages (p: [p.playwright])" --run "python3 fetch_hold_layouts.py"
 """
 import base64
 import json
 import sys
+import zipfile
 
 from playwright.sync_api import sync_playwright
 
@@ -59,17 +64,22 @@ def manifest_from(layout, label):
     return {"label": label, "cells": cells}
 
 
+def build_zip(holds_dir, zip_path):
+    """Bundle data/holds/ into one archive. PNGs are stored (already
+    compressed); the small JSON manifests are deflated. moonlink-pwa's importer
+    reads both methods."""
+    with zipfile.ZipFile(zip_path, "w") as z:
+        for j in sorted(holds_dir.glob("*.json")):
+            z.write(j, j.name, compress_type=zipfile.ZIP_DEFLATED)
+        for img in sorted((holds_dir / "img").glob("*.png")):
+            z.write(img, f"img/{img.name}", compress_type=zipfile.ZIP_STORED)
+
+
 def main():
     cfg = load_config()
     out = output_dir(cfg)
-    if not cfg["moonlink_pwa_dir"]:
-        print("note: moonlink_pwa_dir not set in config.json — writing raw "
-              "layouts to data/ only")
-        pwa_holds = None
-    else:
-        import pathlib
-        pwa_holds = pathlib.Path(cfg["moonlink_pwa_dir"]).expanduser() / "holds"
-        (pwa_holds / "img").mkdir(parents=True, exist_ok=True)
+    holds_dir = out / "holds"
+    (holds_dir / "img").mkdir(parents=True, exist_ok=True)
 
     with sync_playwright() as pw:
         client = MoonBoardClient(pw)
@@ -82,18 +92,15 @@ def main():
                 if not (layout.get("Data") or []):
                     print(f"no hold data for {board['name']} (setup {board['id']}) — skipped")
                     continue
-                (out / f"holds_{slug}.json").write_text(json.dumps(layout))
                 manifest = manifest_from(layout, board["name"])
                 n = len(manifest["cells"])
                 print(f"{board['name']}: {n} holds in "
                       f"{len(layout['Data'])} holdsets")
-                if not pwa_holds:
-                    continue
-                (pwa_holds / f"{slug}.json").write_text(json.dumps(manifest))
+                (holds_dir / f"{slug}.json").write_text(json.dumps(manifest))
                 index[slug] = board["name"]
                 fetched = skipped = 0
                 for img, _rot in manifest["cells"].values():
-                    dst = pwa_holds / "img" / img
+                    dst = holds_dir / "img" / img
                     if dst.exists():
                         skipped += 1
                         continue
@@ -104,11 +111,14 @@ def main():
                     dst.write_bytes(base64.b64decode(res["b64"]))
                     fetched += 1
                 print(f"  images: {fetched} fetched, {skipped} already present")
-            if pwa_holds and index:
-                (pwa_holds / "index.json").write_text(json.dumps(index))
-                print(f"wrote {pwa_holds}/index.json ({', '.join(index)})")
-            if not index and pwa_holds:
+            if not index:
                 sys.exit("nothing fetched")
+            (holds_dir / "index.json").write_text(json.dumps(index))
+            zip_path = out / "moonlink_holds.zip"
+            build_zip(holds_dir, zip_path)
+            mb = zip_path.stat().st_size / 1e6
+            print(f"\nbundled {len(index)} board(s) -> {zip_path} ({mb:.1f} MB)")
+            print("import that zip into moonlink-pwa (drop it on the library zone)")
         finally:
             client.close()
 
