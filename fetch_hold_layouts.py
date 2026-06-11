@@ -65,14 +65,16 @@ def manifest_from(layout, label):
 
 
 def build_zip(holds_dir, zip_path):
-    """Bundle data/holds/ into one archive. PNGs are stored (already
-    compressed); the small JSON manifests are deflated. moonlink-pwa's importer
-    reads both methods."""
-    with zipfile.ZipFile(zip_path, "w") as z:
+    """Bundle data/holds/ into one archive. Everything is stored (not
+    compressed) so the PWA needs no inflate step — DecompressionStream's
+    deflate-raw support is patchy (missing on some Firefox/Safari/Bluefy), and
+    the JSON manifests are tiny while the PNGs are already compressed, so
+    storing costs almost nothing and works everywhere."""
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED) as z:
         for j in sorted(holds_dir.glob("*.json")):
-            z.write(j, j.name, compress_type=zipfile.ZIP_DEFLATED)
+            z.write(j, j.name)
         for img in sorted((holds_dir / "img").glob("*.png")):
-            z.write(img, f"img/{img.name}", compress_type=zipfile.ZIP_STORED)
+            z.write(img, f"img/{img.name}")
 
 
 def main():
