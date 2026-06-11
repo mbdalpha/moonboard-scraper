@@ -1,0 +1,11 @@
+{
+  "boards": [
+    { "id": 21, "name": "MoonBoard 2024", "angles": ["40°"] }
+  ],
+  "benchmarks_only": false,
+  "min_grade": null,
+  "max_grade": null,
+  "setter": null,
+  "output_dir": "data",
+  "write_benchmark_files": true
+}

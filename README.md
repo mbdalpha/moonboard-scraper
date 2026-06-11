@@ -22,15 +22,16 @@ can light problems on a physical LED board.
 1. [What you need](#1-what-you-need)
 2. [The big picture](#2-the-big-picture)
 3. [One-time setup](#3-one-time-setup)
-4. [Step A — start the intercepting proxy](#step-a--start-the-intercepting-proxy)
-5. [Step B — point your phone at it (VPN + cert)](#step-b--point-your-phone-at-it-vpn--cert)
-6. [Step C — capture a request and fetch everything](#step-c--capture-a-request-and-fetch-everything)
-7. [Step D — convert for moonlink-pwa](#step-d--convert-for-moonlink-pwa)
-8. [Step E — use it in moonlink-pwa](#step-e--use-it-in-moonlink-pwa)
-9. [Running it again later](#running-it-again-later)
-10. [Troubleshooting](#troubleshooting)
-11. [File reference](#file-reference)
-12. [Legal](#legal)
+4. [Choosing what to download — config.json](#4-choosing-what-to-download--configjson)
+5. [Step A — start the intercepting proxy](#step-a--start-the-intercepting-proxy)
+6. [Step B — point your phone at it (VPN + cert)](#step-b--point-your-phone-at-it-vpn--cert)
+7. [Step C — capture a request and fetch everything](#step-c--capture-a-request-and-fetch-everything)
+8. [Step D — convert for moonlink-pwa](#step-d--convert-for-moonlink-pwa)
+9. [Step E — use it in moonlink-pwa](#step-e--use-it-in-moonlink-pwa)
+10. [Running it again later](#running-it-again-later)
+11. [Troubleshooting](#troubleshooting)
+12. [File reference](#file-reference)
+13. [Legal](#legal)
 
 ---
 
@@ -94,6 +95,59 @@ chmod +x *.sh
 the app-based flow. If you do want it: `cp credentials.example.json
 credentials.json` and fill it in. It is git-ignored.
 
+## 4. Choosing what to download — config.json
+
+`config.json` controls which part of the catalog `fetch_problems.py` downloads
+and which subsets it (and `to_moonlink.py`) write to disk. The checked-in
+default reproduces the classic behaviour — MoonBoard 2024 at 40°, plus a
+benchmarks file:
+
+```json
+{
+  "boards": [
+    { "id": 21, "name": "MoonBoard 2024", "angles": ["40°"] }
+  ],
+  "benchmarks_only": false,
+  "min_grade": null,
+  "max_grade": null,
+  "setter": null,
+  "output_dir": "data",
+  "write_benchmark_files": true
+}
+```
+
+| Key | Meaning |
+|---|---|
+| `boards` | Which boards to download. `id` is the `{board}` segment of the app's sync URL (`/problems/get/{board}/...`). Confirmed ids (probed live 2026-06-11): **15** = MoonBoard 2017 (25°/40°), **17** = MoonBoard 2019 (25°/40°), **19** = MoonBoard Mini 2020 (40°), **21** = MoonBoard 2024 (25°/40°), **22** = MoonBoard Mini 2024 (40°). Ids 16, 18, 20, 23–25 return empty catalogs — the 2016 board is not in the app backend at all. `angles` picks which wall angles get their own output files — a list like `["40°", "25°"]` (plain `"40"` works too) or `"all"` for every angle found in the data. |
+| `benchmarks_only` | `true` → only benchmark problems are written. |
+| `min_grade` / `max_grade` | Inclusive Font-grade range, e.g. `"6B+"` … `"7C"`. |
+| `setter` | Only problems whose setter name contains this string (case-insensitive), e.g. `"Ben Moon"`. |
+| `output_dir` | Where dataset files are written (relative to the repo). |
+| `write_benchmark_files` | Also write a `*_benchmarks` subset next to each full per-angle file. |
+
+Note the sync API always returns a board's **complete catalog** in one go, so
+`boards` is what controls the actual download; the other keys filter what gets
+written. Output names are derived from the board name and angle:
+`data/moonboard2024_all.json` (raw catalog), `data/moonboard2024_40.json`,
+`data/moonboard2024_40_benchmarks.json`, and after Step D the matching
+`*_moonlink.json` files.
+
+Example — everything on both 2024 angles, no extra benchmark files:
+
+```json
+{ "boards": [{ "id": 21, "name": "MoonBoard 2024", "angles": "all" }],
+  "write_benchmark_files": false }
+```
+
+Example — just the 40° benchmarks from 7A up:
+
+```json
+{ "boards": [{ "id": 21, "name": "MoonBoard 2024", "angles": ["40°"] }],
+  "benchmarks_only": true, "min_grade": "7A" }
+```
+
+If `config.json` is missing, the defaults above are used.
+
 ## Step A — start the intercepting proxy
 
 ```bash
@@ -156,28 +210,28 @@ nothing happens). The script:
 2. Extracts its auth headers to `data/auth_headers.json`.
 3. Immediately runs `fetch_problems.py`, which replays the sync endpoint
    ```
-   GET /_bs_api/v1/problems/get/21/0/{maxDateInserted}/{maxDateUpdated}/{maxDateDeleted}?api-version=3.0
+   GET /_bs_api/v1/problems/get/{board}/0/{maxDateInserted}/{maxDateUpdated}/{maxDateDeleted}?api-version=3.0
    ```
-   (board `21` = MoonBoard 2024) starting from the year 2000 and advancing all
-   three sync watermarks. The server caps each response at 25,000 rows, so it
-   pages until a response is under the cap and adds no new problem ids — about
-   **3 calls** for the full catalog.
+   for each board in `config.json` (board `21` = MoonBoard 2024) starting from
+   the year 2000 and advancing all three sync watermarks. The server caps each
+   response at 25,000 rows, so it pages until a response is under the cap and
+   adds no new problem ids — about **3 calls** for the full catalog.
 
-Expected output:
+Expected output (with the default config):
 ```
+Fetching full MoonBoard 2024 catalog (board id 21)...
   page 1: 25000 rows (25000 new), total unique 25000
   page 2: 10777 rows (10777 new), total unique 35777
   page 3: 5 rows (0 new), total unique 35777
 
-Total 2024 problems:        35777
-  at 40°:                   35773  -> data/moonboard2024_40.json
-  at 40° benchmarks:        411    -> data/moonboard2024_40_benchmarks.json
-  at 25°:                   35233
+Total MoonBoard 2024 problems: 35777  -> data/moonboard2024_all.json
+  at 40°:                 35773  -> data/moonboard2024_40.json
+  at 40° benchmarks:      411  -> data/moonboard2024_40_benchmarks.json
 ```
 
-Outputs (all git-ignored):
-- `data/moon2024_all.json` — every 2024 problem (both angles)
-- `data/moonboard2024_40.json` — all 40° problems
+Outputs (all git-ignored; names derive from the config's board name + angles):
+- `data/moonboard2024_all.json` — every problem on the board, unfiltered (both angles)
+- `data/moonboard2024_40.json` — 40° problems, after the config's filters
 - `data/moonboard2024_40_benchmarks.json` — 40° benchmarks only
 
 ## Step D — convert for moonlink-pwa
@@ -189,7 +243,8 @@ expects an array of `{Description, IsStart, IsEnd}` objects. Reshape it:
 python3 to_moonlink.py
 ```
 
-Produces:
+It converts whatever boards/angles `config.json` selected. With the default
+config it produces:
 - `data/moonboard2024_40_moonlink.json` — all 35,773 40° problems
 - `data/moonboard2024_40_benchmarks_moonlink.json` — the 411 benchmarks
 
@@ -242,8 +297,10 @@ you stopped it (`sudo systemctl start firewall`).
 | `start_proxy.sh` | starts mitmproxy in WireGuard mode; prints the phone config + QR |
 | `capture_addon.py` | mitmproxy addon that logs `ems-x.com` traffic to `data/captured_requests.jsonl` |
 | `capture_and_fetch.sh` | waits for a fresh captured request, extracts its headers, runs the fetch |
-| `fetch_problems.py` | replays the app's sync API and pages the full catalog |
-| `to_moonlink.py` | converts the dataset into moonlink-pwa's import schema |
+| `config.json` | which boards/angles/subsets to download — see [section 4](#4-choosing-what-to-download--configjson) |
+| `config.py` | loads + validates `config.json`; shared by the fetch and convert scripts |
+| `fetch_problems.py` | replays the app's sync API and pages the full catalog (per `config.json`) |
+| `to_moonlink.py` | converts the dataset into moonlink-pwa's import schema (per `config.json`) |
 | `pull_moonboard.py` | legacy `moonboard.com` website scraper (kept for reference; no longer returns 2024 data) |
 | `run.sh` | `nix-shell` wrapper for `pull_moonboard.py` |
 | `APP_API_NOTES.md` | the reverse-engineered backend, endpoints, and auth flow |

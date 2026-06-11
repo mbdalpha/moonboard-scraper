@@ -17,12 +17,9 @@ data/page_*.html
 data/helpers.min.js
 
 # --- generated datasets (large; Moon Climbing's data — pull your own) ---
-data/moon2024_all.json
-data/moonboard2024_40.json
-data/moonboard2024_40_benchmarks.json
-data/moonboard2024_40_moonlink.json
-data/moonboard2024_40_benchmarks_moonlink.json
+# names derive from config.json (board name + angle), e.g. moonboard2024_40.json
 data/*.json
+data_test/
 
 # python
 __pycache__/

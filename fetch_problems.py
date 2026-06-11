@@ -13,6 +13,9 @@ watermarks until a call returns fewer than the cap and adds no new problem ids.
 Auth headers (bearer + Firebase App Check 'transfer-purpose' token, build ids)
 are read from data/auth_headers.json, captured live from the iPhone. Those
 tokens expire (~1h for App Check), so re-capture if you get 401/403.
+
+Which boards/angles/subsets get downloaded and written is driven by
+config.json — see config.py for the schema.
 """
 import gzip
 import json
@@ -22,10 +25,12 @@ import time
 import urllib.parse
 import urllib.request
 
+from config import (load_config, board_slug, angle_token, board_angles,
+                    passes_filters, output_dir)
+
 HERE = pathlib.Path(__file__).resolve().parent
 DATA = HERE / "data"
 HOST = "https://grn-climbing.ems-x.com"
-BOARD_2024 = 21
 CAP = 25000
 EPOCH = "2000-01-01 00:00:00.000"
 
@@ -45,20 +50,23 @@ def fetch(headers, board, w1, w2, w3):
             raw = gzip.decompress(raw)
     body = json.loads(raw.decode())
     upd = body.get("updates")
-    return json.loads(upd) if isinstance(upd, str) else (upd or [])
+    if isinstance(upd, str):  # server sends "" (not null) when there's nothing left
+        upd = json.loads(upd) if upd.strip() else []
+    return upd or []
 
 
 def batch_watermarks(batch):
+    # configurations can be null (not just missing) on some boards
     di = max((p["dateInserted"] for p in batch if p.get("dateInserted")), default=None)
-    du = max((c["dateUpdated"] for p in batch for c in p.get("configurations", [])
+    du = max((c["dateUpdated"] for p in batch for c in (p.get("configurations") or [])
               if c.get("dateUpdated")), default=None)
     dd = max((d for p in batch for d in
-              ([p.get("dateDeleted")] + [c.get("dateDeleted") for c in p.get("configurations", [])])
+              ([p.get("dateDeleted")] + [c.get("dateDeleted") for c in (p.get("configurations") or [])])
               if d), default=None)
     return _fmt(di), _fmt(du), _fmt(dd)
 
 
-def fetch_all(headers, board=BOARD_2024):
+def fetch_all(headers, board):
     problems = {}
     w1 = w2 = w3 = EPOCH
     page = 0
@@ -82,28 +90,43 @@ def fetch_all(headers, board=BOARD_2024):
     return list(problems.values())
 
 
-def has_angle(problem, angle):
-    return any(c.get("configuration") == angle for c in problem.get("configurations", []))
+def config_at(problem, angle):
+    for c in problem.get("configurations") or []:
+        if c.get("configuration") == angle:
+            return c
+    return None
 
 
 def main():
+    cfg = load_config()
     headers = json.load(open(DATA / "auth_headers.json"))
-    print("Fetching full MoonBoard 2024 catalog...")
-    allp = fetch_all(headers)
-    (DATA / "moon2024_all.json").write_text(json.dumps(allp, indent=2))
+    out = output_dir(cfg)
 
-    deg40 = [p for p in allp if has_angle(p, "40°")]
-    deg25 = [p for p in allp if has_angle(p, "25°")]
-    bench40 = [p for p in deg40
-               if any(c.get("configuration") == "40°" and c.get("isBenchmark")
-                      for c in p["configurations"])]
-    (DATA / "moonboard2024_40.json").write_text(json.dumps(deg40, indent=2))
-    (DATA / "moonboard2024_40_benchmarks.json").write_text(json.dumps(bench40, indent=2))
+    for board in cfg["boards"]:
+        slug = board_slug(board)
+        print(f"Fetching full {board['name']} catalog (board id {board['id']})...")
+        allp = fetch_all(headers, board["id"])
+        raw_path = out / f"{slug}_all.json"
+        raw_path.write_text(json.dumps(allp, indent=2))
+        print(f"\nTotal {board['name']} problems: {len(allp)}  -> {raw_path}")
 
-    print(f"\nTotal 2024 problems:        {len(allp)}")
-    print(f"  at 40°:                   {len(deg40)}  -> data/moonboard2024_40.json")
-    print(f"  at 40° benchmarks:        {len(bench40)}  -> data/moonboard2024_40_benchmarks.json")
-    print(f"  at 25°:                   {len(deg25)}")
+        for angle in board_angles(board, allp):
+            tok = angle_token(angle)
+            subset, bench = [], []
+            for p in allp:
+                c = config_at(p, angle)
+                if not c or not passes_filters(p, c, cfg):
+                    continue
+                subset.append(p)
+                if c.get("isBenchmark"):
+                    bench.append(p)
+            path = out / f"{slug}_{tok}.json"
+            path.write_text(json.dumps(subset, indent=2))
+            print(f"  at {angle}:                 {len(subset)}  -> {path}")
+            if cfg["write_benchmark_files"] and not cfg["benchmarks_only"]:
+                bpath = out / f"{slug}_{tok}_benchmarks.json"
+                bpath.write_text(json.dumps(bench, indent=2))
+                print(f"  at {angle} benchmarks:      {len(bench)}  -> {bpath}")
 
 
 if __name__ == "__main__":
