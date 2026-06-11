@@ -1,0 +1,29 @@
+# --- secrets / credentials (NEVER commit) ---
+credentials.json
+data/auth_headers.json
+data/captured_requests.jsonl
+data/moon-wg.conf
+data/moon-wg-qr.png
+
+# logged-in browser session
+browser-profile/
+
+# captured traffic + debug dumps (tied to your account)
+data/*.log
+data/login_debug.html
+data/dashboard_rendered.html
+data/dashboard.png
+data/page_*.html
+data/helpers.min.js
+
+# --- generated datasets (large; Moon Climbing's data — pull your own) ---
+data/moon2024_all.json
+data/moonboard2024_40.json
+data/moonboard2024_40_benchmarks.json
+data/moonboard2024_40_moonlink.json
+data/moonboard2024_40_benchmarks_moonlink.json
+data/*.json
+
+# python
+__pycache__/
+*.pyc
