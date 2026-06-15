@@ -8,6 +8,8 @@ Instead of running each script by hand, drive the lot from here:
   ./moonboard proxy      just start the intercepting proxy + print the phone QR
   ./moonboard convert    re-run only the moonlink conversion on existing data
   ./moonboard holds      pull hold photos/layouts and bundle them for the PWA
+  ./moonboard boards     list the boards/angles you can scrape
+  ./moonboard select     choose which board + angle to scrape (writes config.json)
   ./moonboard stop       stop the proxy
   ./moonboard config     print the active config.json
   ./moonboard status     show proxy / data / pwa-link state at a glance
@@ -21,6 +23,7 @@ them, so nothing here locks you into using the CLI.
 """
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -30,6 +33,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 DATA = HERE / "data"
 CAPTURED = DATA / "captured_requests.jsonl"
+CONFIG_FILE = HERE / "config.json"
 
 
 def _run(cmd, **kw):
@@ -81,6 +85,140 @@ def cmd_stop(args):
 def cmd_config(args):
     from config import load_config
     print(json.dumps(load_config(), indent=2, ensure_ascii=False))
+
+
+def _norm_angle(a):
+    """'40' / '40°' / 'all' -> '40°' / 'all'. Returns None if unrecognised."""
+    a = str(a).strip().lower()
+    if a in ("all", ""):
+        return "all"
+    m = re.match(r"^(\d+)\s*(°|deg(rees?)?)?$", a)
+    return m.group(1) + "°" if m else None
+
+
+def _read_config_raw():
+    if CONFIG_FILE.exists():
+        try:
+            return json.loads(CONFIG_FILE.read_text())
+        except json.JSONDecodeError as e:
+            sys.exit(f"config.json is not valid JSON: {e}")
+    return {}
+
+
+def _selected_ids(raw):
+    return {b.get("id") for b in raw.get("boards", []) if isinstance(b, dict)}
+
+
+def cmd_boards(args):
+    from config import KNOWN_BOARDS
+    selected = _selected_ids(_read_config_raw())
+    print("Boards you can scrape (id · name · angles):\n")
+    for b in KNOWN_BOARDS:
+        mark = "●" if b["id"] in selected else " "
+        print(f"  {mark} {b['id']:>3}  {b['name']:<22} {', '.join(b['angles'])}")
+    print("\n● = in the current config.  "
+          "Change it with: ./moonboard select")
+
+
+def _board_entry(known, angle):
+    return {"id": known["id"], "name": known["name"],
+            "angles": "all" if angle == "all" else [angle]}
+
+
+def _ask(prompt, choices):
+    """Prompt for a 1-based choice; returns the chosen item."""
+    for i, (label, _) in enumerate(choices, 1):
+        print(f"  {i}) {label}")
+    while True:
+        raw = input(prompt).strip()
+        if raw.isdigit() and 1 <= int(raw) <= len(choices):
+            return choices[int(raw) - 1][1]
+        print(f"  enter a number 1–{len(choices)}")
+
+
+def _select_interactive():
+    from config import KNOWN_BOARDS
+    if not sys.stdin.isatty():
+        sys.exit("Not a terminal — pass --board and --angle "
+                 "(e.g. ./moonboard select --board 21 --angle 40, "
+                 "or --all).")
+    print("Which board?")
+    choices = [(f"{b['name']} ({', '.join(b['angles'])})", b)
+               for b in KNOWN_BOARDS]
+    choices.append(("all boards", "all"))
+    pick = _ask("Choose [1–%d]: " % len(choices), choices)
+
+    boards = KNOWN_BOARDS if pick == "all" else [pick]
+    # offer the angles available across the chosen board(s)
+    avail = sorted({a for b in boards for a in b["angles"]},
+                   key=lambda a: int(a.rstrip("°")))
+    if len(avail) == 1:
+        angle = avail[0]
+    else:
+        print("\nWhich angle?")
+        ac = [(a, a) for a in avail] + [("all angles", "all")]
+        angle = _ask("Choose [1–%d]: " % len(ac), ac)
+    return boards, angle
+
+
+def _resolve_board(ref):
+    """Match --board against id, exact name, or unambiguous name substring."""
+    from config import KNOWN_BOARDS, known_board
+    b = known_board(ref)
+    if b:
+        return [b]
+    r = str(ref).strip().lower()
+    return [x for x in KNOWN_BOARDS if r in x["name"].lower()]
+
+
+def cmd_select(args):
+    from config import KNOWN_BOARDS
+
+    valid_angles = sorted({a for b in KNOWN_BOARDS for a in b["angles"]},
+                          key=lambda a: int(a.rstrip("°")))
+
+    if args.all or args.board or args.angle:
+        # non-interactive
+        if args.all:
+            boards = KNOWN_BOARDS
+        elif args.board:
+            boards = _resolve_board(args.board)
+            if not boards:
+                opts = ", ".join(f"{x['id']} ({x['name']})" for x in KNOWN_BOARDS)
+                sys.exit(f"unknown board {args.board!r} — pick one of: {opts}")
+            if len(boards) > 1:
+                names = ", ".join(f"{x['id']} ({x['name']})" for x in boards)
+                sys.exit(f"{args.board!r} matches several boards: {names} — "
+                         "use the id")
+        else:
+            sys.exit("give a board: --board <id|name> or --all")
+        angle = _norm_angle(args.angle) if args.angle else "all"
+        if angle is None:
+            sys.exit(f"bad --angle {args.angle!r} — use {', '.join(valid_angles)}, or all")
+        if angle != "all" and angle not in valid_angles:
+            sys.exit(f"no board has {angle} problems — available: "
+                     f"{', '.join(valid_angles)}, or all")
+    else:
+        boards, angle = _select_interactive()
+
+    entries = [_board_entry(b, angle) for b in boards]
+
+    # warn if a chosen board doesn't have the requested angle
+    if angle != "all":
+        for b in boards:
+            if angle not in b["angles"]:
+                print(f"note: {b['name']} has no {angle} problems — "
+                      "it'll come out empty.")
+
+    raw = _read_config_raw()
+    raw["boards"] = entries
+    CONFIG_FILE.write_text(json.dumps(raw, indent=2, ensure_ascii=False) + "\n")
+
+    desc = ", ".join(f"{e['name']} "
+                     f"({'all angles' if e['angles'] == 'all' else e['angles'][0]})"
+                     for e in entries)
+    print(f"\nconfig.json set to: {desc}")
+    print("Run ./moonboard fetch to scrape it.")
 
 
 def cmd_status(args):
@@ -169,6 +307,18 @@ def main():
                    ).set_defaults(func=cmd_convert)
     sub.add_parser("holds", help="pull hold photos/layouts (needs Chrome)"
                    ).set_defaults(func=cmd_holds)
+
+    sub.add_parser("boards", help="list the boards/angles you can scrape"
+                   ).set_defaults(func=cmd_boards)
+    ps = sub.add_parser("select",
+                        help="choose board + angle to scrape (writes config.json)")
+    ps.add_argument("--board", metavar="ID|NAME",
+                    help="board id or name (e.g. 21 or '2024')")
+    ps.add_argument("--angle", metavar="DEG", help="40, 25, or all")
+    ps.add_argument("--all", action="store_true",
+                    help="scrape every known board (all angles)")
+    ps.set_defaults(func=cmd_select)
+
     sub.add_parser("stop", help="stop the proxy").set_defaults(func=cmd_stop)
     sub.add_parser("config", help="print the active config.json"
                    ).set_defaults(func=cmd_config)

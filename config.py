@@ -43,6 +43,25 @@ FONT_GRADES = ["4", "4+", "5", "5+",
                "7A", "7A+", "7B", "7B+", "7C", "7C+",
                "8A", "8A+", "8B", "8B+", "8C", "8C+", "9A"]
 
+# Boards that exist in the app backend, probed live. id = the {board} segment of
+# the sync URL; angles = the wall angles that board actually has.
+KNOWN_BOARDS = [
+    {"id": 15, "name": "MoonBoard 2017", "angles": ["25°", "40°"]},
+    {"id": 17, "name": "MoonBoard 2019", "angles": ["25°", "40°"]},
+    {"id": 19, "name": "MoonBoard Mini 2020", "angles": ["40°"]},
+    {"id": 21, "name": "MoonBoard 2024", "angles": ["25°", "40°"]},
+    {"id": 22, "name": "MoonBoard Mini 2024", "angles": ["40°"]},
+]
+
+
+def known_board(ref):
+    """Look up a known board by id (int or str) or by case-insensitive name."""
+    ref = str(ref).strip().lower()
+    for b in KNOWN_BOARDS:
+        if ref == str(b["id"]) or ref == b["name"].lower():
+            return b
+    return None
+
 DEFAULTS = {
     "boards": [{"id": 21, "name": "MoonBoard 2024", "angles": ["40°"]}],
     "benchmarks_only": False,
