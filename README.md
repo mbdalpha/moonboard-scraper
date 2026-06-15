@@ -23,6 +23,9 @@ replays that request's sync endpoint to page the whole catalog. Backend details:
 - `nix` (runs the proxy tools) and `python3`.
 - The WireGuard app on the phone, plus Bluefy on iPhone for the LED step (Safari
   has no Web Bluetooth).
+- Only for `./moonboard holds` (optional): a moonboard.com website login and
+  headed Chrome — see [Hold photos](#hold-photos) below. The everyday
+  `fetch` path doesn't need either.
 
 ## The CLI
 
@@ -35,7 +38,7 @@ chmod +x *.sh moonboard
 | `./moonboard fetch` | start the proxy if needed, wait for a phone request, download, convert |
 | `./moonboard proxy` | start the proxy and print the WireGuard QR |
 | `./moonboard convert` | re-run only the conversion on downloaded data |
-| `./moonboard holds` | download hold photos for the PWA (needs Chrome) |
+| `./moonboard holds` | download hold photos from moonboard.com and bundle them for the PWA (separate website login) |
 | `./moonboard boards` | list the boards/angles you can scrape |
 | `./moonboard select` | choose which board + angle to scrape (writes config.json) |
 | `./moonboard stop` | stop the proxy |
@@ -83,7 +86,23 @@ it to the app (`moonlink_pwa_dir`); see `config.py` for the full list.
 Set `moonlink_pwa_dir` in `config.json` to your moonlink-pwa checkout and the
 conversion drops a `problems.json` next to it that the served PWA auto-loads.
 Otherwise just drag a `data/*_moonlink.json` file onto the PWA's drop zone.
-`./moonboard holds` adds real hold photos under the grid.
+
+### Hold photos
+
+`./moonboard holds` adds the real hold photos under the LED grid. This is a
+*separate* path from `fetch`: the photos live on moonboard.com, which sits
+behind Cloudflare, so it drives a headed Chrome (via Playwright) and logs into
+the website. Give it credentials one of two ways:
+
+```bash
+export MOONBOARD_USERNAME=... MOONBOARD_PASSWORD=...   # env, or
+cp credentials.example.json credentials.json          # then fill it in
+```
+
+It writes both `data/moonlink_holds.zip` and `data/moonlink_holds.json` — drop
+either onto the PWA's library zone (the `.json` survives transfer to a phone;
+the `.zip` is smaller for desktop). If `moonlink_pwa_dir` is set, it also copies
+the holds straight into that checkout so a served PWA auto-loads them.
 
 ## Legal
 

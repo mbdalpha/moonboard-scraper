@@ -7,7 +7,8 @@ Instead of running each script by hand, drive the lot from here:
                          (starts the proxy first if it isn't already up)
   ./moonboard proxy      just start the intercepting proxy + print the phone QR
   ./moonboard convert    re-run only the moonlink conversion on existing data
-  ./moonboard holds      pull hold photos/layouts and bundle them for the PWA
+  ./moonboard holds      pull hold photos/layouts from moonboard.com (separate
+                         website login) and bundle them for the PWA
   ./moonboard boards     list the boards/angles you can scrape
   ./moonboard select     choose which board + angle to scrape (writes config.json)
   ./moonboard stop       stop the proxy
@@ -278,6 +279,14 @@ def cmd_convert(args):
 
 
 def cmd_holds(args):
+    # holds come from moonboard.com (not the phone/app path), so it needs a
+    # website login: env vars or credentials.json next to this script.
+    import os
+    has_env = os.environ.get("MOONBOARD_USERNAME") and os.environ.get("MOONBOARD_PASSWORD")
+    if not (has_env or (HERE / "credentials.json").exists()):
+        sys.exit("holds needs a moonboard.com login — set MOONBOARD_USERNAME / "
+                 "MOONBOARD_PASSWORD, or copy credentials.example.json to "
+                 "credentials.json and fill it in.")
     if shutil.which("nix-shell"):
         cmd = ["nix-shell", "-p", "python3.withPackages (p: [p.playwright])",
                "--run", "python3 fetch_hold_layouts.py"]
@@ -305,7 +314,9 @@ def main():
                    ).set_defaults(func=cmd_proxy)
     sub.add_parser("convert", help="re-run the moonlink conversion only"
                    ).set_defaults(func=cmd_convert)
-    sub.add_parser("holds", help="pull hold photos/layouts (needs Chrome)"
+    sub.add_parser("holds",
+                   help="pull hold photos from moonboard.com "
+                        "(headed Chrome + website login)"
                    ).set_defaults(func=cmd_holds)
 
     sub.add_parser("boards", help="list the boards/angles you can scrape"
