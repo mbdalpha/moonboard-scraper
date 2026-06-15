@@ -87,13 +87,39 @@ Two non-obvious things make this work, and both bit us:
 ```bash
 git clone <your-repo-url> moonboard-2024-fetcher
 cd moonboard-2024-fetcher
-chmod +x *.sh
+chmod +x *.sh moonboard
 ```
 
 `credentials.json` is **only** needed by the legacy website scraper
 (`pull_moonboard.py`), which no longer returns 2024 data — you can ignore it for
 the app-based flow. If you do want it: `cp credentials.example.json
 credentials.json` and fill it in. It is git-ignored.
+
+### The `moonboard` CLI (the short way)
+
+You don't have to run the scripts below one at a time — `./moonboard` wraps the
+whole pipeline. The everyday refresh is a single command:
+
+```bash
+./moonboard fetch     # starts the proxy if needed, waits for the phone,
+                      # downloads the catalog, then converts for the PWA
+```
+
+| Command | What it does |
+|---|---|
+| `./moonboard fetch` | the usual run: ensure proxy up → wait for a phone request → download → convert (`--no-convert` to skip the last step, `--timeout SECS` to wait longer) |
+| `./moonboard proxy` | just start the intercepting proxy and print the WireGuard QR |
+| `./moonboard convert` | re-run only the moonlink conversion on already-downloaded data |
+| `./moonboard holds` | pull hold photos/layouts and bundle them for the PWA (needs Chrome) |
+| `./moonboard stop` | stop the proxy |
+| `./moonboard status` | show proxy / capture / dataset / PWA-link state at a glance |
+| `./moonboard config` | print the active `config.json` |
+
+The phone setup (Steps B below) is still a one-time manual step, and every
+underlying script (`start_proxy.sh`, `fetch_problems.py`, `to_moonlink.py`,
+`fetch_hold_layouts.py`) still works on its own if you'd rather drive them
+directly — the CLI is purely a convenience layer. The steps below describe the
+manual flow; map them onto the CLI commands as you like.
 
 ## 4. Choosing what to download — config.json
 
@@ -199,18 +225,18 @@ decrypted). This is the step everyone half-finishes:
 ## Step C — capture a request and fetch everything
 
 The auth tokens (a bearer JWT + a Firebase App Check token) **expire within
-minutes**, so capturing and fetching happen back-to-back in one script:
+minutes**, so capturing and fetching happen back-to-back in one command:
 
 ```bash
-./capture_and_fetch.sh
+./moonboard fetch        # (./capture_and_fetch.sh is a shim that calls this)
 ```
 
 It prints "Waiting for a fresh request…". Now, on the phone, **open the Moon app
 and load the MoonBoard 2024 / 40° problem list** (pull-to-refresh; log out/in if
-nothing happens). The script:
+nothing happens). It then:
 1. Watches `data/captured_requests.jsonl` for a fresh `ems-x.com` request.
 2. Extracts its auth headers to `data/auth_headers.json`.
-3. Immediately runs `fetch_problems.py`, which replays the sync endpoint
+3. Immediately runs the fetch, which replays the sync endpoint
    ```
    GET /_bs_api/v1/problems/get/{board}/0/{maxDateInserted}/{maxDateUpdated}/{maxDateDeleted}?api-version=3.0
    ```
@@ -295,16 +321,15 @@ connect to your board, and it lights up over Bluetooth.
 The catalog grows as people set new problems. To refresh:
 
 ```bash
-./start_proxy.sh            # if the proxy isn't still running
 # phone: toggle the WireGuard tunnel ON, make sure the cert is still trusted
-./capture_and_fetch.sh      # load the 2024/40 list in the app when prompted
-python3 to_moonlink.py
+./moonboard fetch           # starts the proxy if needed, then capture+download+convert
 ```
 
-When you're done, on the phone toggle the WireGuard tunnel **OFF** (you can leave
-the tunnel + cert installed for next time, or remove them under VPN & Device
-Management). On the computer: `pkill -f mitmdump`, and re-enable your firewall if
-you stopped it (`sudo systemctl start firewall`).
+That single command covers starting the proxy, capturing, downloading, and
+converting. When you're done, on the phone toggle the WireGuard tunnel **OFF**
+(you can leave the tunnel + cert installed for next time, or remove them under
+VPN & Device Management). On the computer: `./moonboard stop`, and re-enable your
+firewall if you stopped it (`sudo systemctl start firewall`).
 
 ## Troubleshooting
 
@@ -315,16 +340,17 @@ you stopped it (`sudo systemctl start firewall`).
 | Every site fails with "certificate unknown" in `data/wg.log` | Cert not trusted yet — finish **B2 step 3** (Certificate Trust Settings). |
 | App hangs forever on "please wait" | The proxy is intercepting attestation. Confirm you started via `start_proxy.sh` (it sets `--allow-hosts 'ems-x\.com'`). Without that, Apple/Firebase handshakes break. |
 | App works but `data/captured_requests.jsonl` stays empty | You're on a plain **HTTP proxy**, which Flutter ignores. You must use **WireGuard mode** (`start_proxy.sh`), not a Wi-Fi proxy. Turn the Wi-Fi proxy **Off**. |
-| `fetch_problems.py` exits `HTTP 401`/`403` | Tokens expired. Just re-run `./capture_and_fetch.sh` and reload the app — capture and fetch must happen within a couple of minutes. |
+| fetch exits `HTTP 401`/`403` | Tokens expired. Just re-run `./moonboard fetch` and reload the app — capture and fetch must happen within a couple of minutes. |
 | `gateway.icloud.com` handshake failures spamming the log | Normal. Apple pins those; we don't intercept them. Ignore. |
 
 ## File reference
 
 | File | Purpose |
 |---|---|
+| `moonboard` | unified CLI that drives the whole pipeline (`fetch` / `proxy` / `convert` / `holds` / `stop` / `status` / `config`) |
 | `start_proxy.sh` | starts mitmproxy in WireGuard mode; prints the phone config + QR |
 | `capture_addon.py` | mitmproxy addon that logs `ems-x.com` traffic to `data/captured_requests.jsonl` |
-| `capture_and_fetch.sh` | waits for a fresh captured request, extracts its headers, runs the fetch |
+| `capture_and_fetch.sh` | backwards-compatible shim that forwards to `./moonboard fetch` |
 | `config.json` | which boards/angles/subsets to download — see [section 4](#4-choosing-what-to-download--configjson) |
 | `config.py` | loads + validates `config.json`; shared by the fetch and convert scripts |
 | `fetch_problems.py` | replays the app's sync API and pages the full catalog (per `config.json`) |

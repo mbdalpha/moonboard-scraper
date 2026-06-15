@@ -1,0 +1,186 @@
+#!/usr/bin/env python3
+"""moonboard — one front door for the whole MoonBoard-dataset pipeline.
+
+Instead of running each script by hand, drive the lot from here:
+
+  ./moonboard fetch      capture a phone request, download the catalog, convert
+                         (starts the proxy first if it isn't already up)
+  ./moonboard proxy      just start the intercepting proxy + print the phone QR
+  ./moonboard convert    re-run only the moonlink conversion on existing data
+  ./moonboard holds      pull hold photos/layouts and bundle them for the PWA
+  ./moonboard stop       stop the proxy
+  ./moonboard config     print the active config.json
+  ./moonboard status     show proxy / data / pwa-link state at a glance
+
+Everyday refresh is a single command: ./moonboard fetch  (then, on the phone,
+toggle the WireGuard tunnel ON and reload the board's problem list when asked).
+
+Each underlying script still runs standalone — start_proxy.sh, fetch_problems.py,
+to_moonlink.py, fetch_hold_layouts.py — this is only a friendlier wrapper around
+them, so nothing here locks you into using the CLI.
+"""
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+DATA = HERE / "data"
+CAPTURED = DATA / "captured_requests.jsonl"
+
+
+def _run(cmd, **kw):
+    return subprocess.run(cmd, cwd=HERE, **kw)
+
+
+def proxy_running():
+    """True if mitmproxy's WireGuard listener is up (UDP 51820)."""
+    try:
+        out = subprocess.run(["ss", "-ulnp"], capture_output=True, text=True)
+        return ":51820" in out.stdout
+    except FileNotFoundError:
+        return False
+
+
+def _count_lines(path):
+    try:
+        with open(path) as f:
+            return sum(1 for line in f if line.strip())
+    except FileNotFoundError:
+        return 0
+
+
+def wait_for_capture(timeout=600):
+    before = _count_lines(CAPTURED)
+    print("On the phone now: WireGuard tunnel ON, then reload the board's "
+          "problem list in the Moon app (log out/in if nothing happens).")
+    print(f"Waiting up to {timeout // 60} min for a fresh request…")
+    for _ in range(timeout):
+        if _count_lines(CAPTURED) > before:
+            return True
+        time.sleep(1)
+    return False
+
+
+def cmd_proxy(args):
+    if proxy_running():
+        print("Proxy already listening on UDP 51820.")
+        return
+    _run(["bash", "start_proxy.sh"])
+
+
+def cmd_stop(args):
+    _run(["pkill", "-f", "mitmdump"])
+    print("Proxy stopped (if it was running). On the phone, toggle the "
+          "WireGuard tunnel OFF when you're done.")
+
+
+def cmd_config(args):
+    from config import load_config
+    print(json.dumps(load_config(), indent=2, ensure_ascii=False))
+
+
+def cmd_status(args):
+    from config import load_config
+    cfg = load_config()
+    print(f"proxy:    {'running (UDP 51820)' if proxy_running() else 'stopped'}")
+    print(f"captured: {_count_lines(CAPTURED)} requests logged")
+    auth = DATA / "auth_headers.json"
+    print(f"auth:     {'present' if auth.exists() else 'none'} "
+          f"({auth.name})")
+    print("datasets:")
+    found = sorted(DATA.glob("*_all.json")) if DATA.exists() else []
+    for p in found:
+        mb = p.stat().st_size / 1e6
+        print(f"  {p.name}  ({mb:.1f} MB)")
+    if not found:
+        print("  none yet — run ./moonboard fetch")
+    pwa = cfg.get("moonlink_pwa_dir")
+    print(f"pwa link: {pwa or 'not configured'}")
+
+
+def cmd_fetch(args):
+    import urllib.error
+    import fetch_problems
+    import to_moonlink
+
+    if not proxy_running():
+        print("Proxy isn't running — starting it (scan the QR below the "
+              "first time)…\n")
+        cmd_proxy(args)
+        print()
+        # give mitmproxy a moment to settle before we start watching
+        time.sleep(2)
+
+    if not wait_for_capture(timeout=args.timeout):
+        sys.exit("No fresh request seen — is the WireGuard tunnel ON and the "
+                 "app reloading? (Re-run ./moonboard fetch to try again.)")
+
+    print("\nFresh request captured. Extracting headers + downloading…")
+    if not fetch_problems.extract_auth_headers():
+        sys.exit("Captured traffic but found no authenticated ems-x request — "
+                 "reload the problem list in the app (log out/in if needed).")
+    try:
+        fetch_problems.main()
+    except urllib.error.HTTPError as e:
+        sys.exit(f"HTTP {e.code} — tokens likely expired; just run "
+                 f"./moonboard fetch again. {e.read()[:200]}")
+
+    if not args.no_convert:
+        print()
+        to_moonlink.main()
+
+
+def cmd_convert(args):
+    import to_moonlink
+    to_moonlink.main()
+
+
+def cmd_holds(args):
+    if shutil.which("nix-shell"):
+        cmd = ["nix-shell", "-p", "python3.withPackages (p: [p.playwright])",
+               "--run", "python3 fetch_hold_layouts.py"]
+    else:
+        cmd = ["python3", "fetch_hold_layouts.py"]
+    sys.exit(_run(cmd).returncode)
+
+
+def main():
+    p = argparse.ArgumentParser(
+        prog="moonboard",
+        description="One CLI for the MoonBoard-dataset pipeline.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="Everyday refresh:  ./moonboard fetch")
+    sub = p.add_subparsers(dest="command")
+
+    pf = sub.add_parser("fetch", help="capture + download + convert (the usual run)")
+    pf.add_argument("--timeout", type=int, default=600,
+                    metavar="SECS", help="how long to wait for a phone request")
+    pf.add_argument("--no-convert", action="store_true",
+                    help="download only; skip the moonlink conversion")
+    pf.set_defaults(func=cmd_fetch)
+
+    sub.add_parser("proxy", help="start the intercepting proxy + print the QR"
+                   ).set_defaults(func=cmd_proxy)
+    sub.add_parser("convert", help="re-run the moonlink conversion only"
+                   ).set_defaults(func=cmd_convert)
+    sub.add_parser("holds", help="pull hold photos/layouts (needs Chrome)"
+                   ).set_defaults(func=cmd_holds)
+    sub.add_parser("stop", help="stop the proxy").set_defaults(func=cmd_stop)
+    sub.add_parser("config", help="print the active config.json"
+                   ).set_defaults(func=cmd_config)
+    sub.add_parser("status", help="show proxy/data/link state"
+                   ).set_defaults(func=cmd_status)
+
+    args = p.parse_args()
+    if not getattr(args, "func", None):
+        p.print_help()
+        return
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

@@ -34,6 +34,27 @@ HOST = "https://grn-climbing.ems-x.com"
 CAP = 25000
 EPOCH = "2000-01-01 00:00:00.000"
 
+# headers we replay from a captured app request (bearer + App Check + build ids)
+AUTH_KEEP = ("authorization", "transfer-bid", "transfer-purpose", "transfer-ver",
+             "transfer-osver", "user-agent", "accept-encoding")
+
+
+def extract_auth_headers(captured=DATA / "captured_requests.jsonl",
+                         out=DATA / "auth_headers.json"):
+    """Pull the newest authenticated ems-x request's headers out of the
+    mitmproxy capture log into auth_headers.json. Returns True on success."""
+    try:
+        recs = [json.loads(line) for line in open(captured) if line.strip()]
+    except FileNotFoundError:
+        return False
+    for r in reversed(recs):
+        h = {k.lower(): v for k, v in (r.get("req_headers") or {}).items()}
+        if "authorization" in h and "ems-x" in r.get("url", ""):
+            with open(out, "w") as f:
+                json.dump({k: h[k] for k in AUTH_KEEP if k in h}, f, indent=2)
+            return True
+    return False
+
 
 def _fmt(iso):
     return iso.replace("T", " ") if iso else None
