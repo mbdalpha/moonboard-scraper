@@ -78,31 +78,7 @@ Or edit `config.json` directly. Default is MoonBoard 2024 at 40°:
 ```
 
 `angles` can be a list like `["25°","40°"]` or `"all"`. The remaining keys
-filter the output (`benchmarks_only`, `min_grade`/`max_grade`, `setter`) or wire
-it to the app (`moonlink_pwa_dir`); see `config.py` for the full list.
-
-## Using it in moonlink-pwa
-
-Set `moonlink_pwa_dir` in `config.json` to your moonlink-pwa checkout and the
-conversion drops a `problems.json` next to it that the served PWA auto-loads.
-Otherwise just drag a `data/*_moonlink.json` file onto the PWA's drop zone.
-
-### Hold photos
-
-`./moonboard holds` adds the real hold photos under the LED grid. This is a
-*separate* path from `fetch`: the photos live on moonboard.com, which sits
-behind Cloudflare, so it drives a headed Chrome (via Playwright) and logs into
-the website. Give it credentials one of two ways:
-
-```bash
-export MOONBOARD_USERNAME=... MOONBOARD_PASSWORD=...   # env, or
-cp credentials.example.json credentials.json          # then fill it in
-```
-
-It writes both `data/moonlink_holds.zip` and `data/moonlink_holds.json` — drop
-either onto the PWA's library zone (the `.json` survives transfer to a phone;
-the `.zip` is smaller for desktop). If `moonlink_pwa_dir` is set, it also copies
-the holds straight into that checkout so a served PWA auto-loads them.
+filter the output (`benchmarks_only`, `min_grade`/`max_grade`, `setter`)
 
 ## Legal
 
